@@ -23,14 +23,14 @@ func TestParsePrometheusLabels(t *testing.T) {
  - persistentvolumeclaim = prometheus-data-prometheus-k8s-0
  - severity = critical`,
 			expected: map[string]string{
-				"alertname":              "KubePersistentVolumeFillingUp",
-				"endpoint":               "https-metrics",
-				"instance":               "10.91.81.110:10250",
-				"job":                    "kubelet",
-				"namespace":              "openshift-monitoring",
-				"node":                   "ip-10-91-81-110.us-west-2.compute.internal",
-				"persistentvolumeclaim":  "prometheus-data-prometheus-k8s-0",
-				"severity":               "critical",
+				"alertname":             "KubePersistentVolumeFillingUp",
+				"endpoint":              "https-metrics",
+				"instance":              "10.91.81.110:10250",
+				"job":                   "kubelet",
+				"namespace":             "openshift-monitoring",
+				"node":                  "ip-10-91-81-110.us-west-2.compute.internal",
+				"persistentvolumeclaim": "prometheus-data-prometheus-k8s-0",
+				"severity":              "critical",
 			},
 		},
 		{
@@ -75,10 +75,10 @@ func TestPayloadStructure(t *testing.T) {
  - persistentvolumeclaim = prometheus-data-prometheus-k8s-0
  - node = ip-10-91-81-110.us-west-2.compute.internal
  - severity = critical`,
-		"link":        "https://github.com/openshift/runbooks/blob/master/alerts/cluster-monitoring-operator/KubePersistentVolumeFillingUp.md",
-		"num_firing":  "2",
-		"ocm_link":    "https://console.redhat.com/openshift/details/d9045cbe-348d-4f7b-9f4b-ccaaacdc0977",
-		"region":      "us-west-2",
+		"link":       "https://github.com/openshift/runbooks/blob/master/alerts/cluster-monitoring-operator/KubePersistentVolumeFillingUp.md",
+		"num_firing": "2",
+		"ocm_link":   "https://console.redhat.com/openshift/details/d9045cbe-348d-4f7b-9f4b-ccaaacdc0977",
+		"region":     "us-west-2",
 	}
 
 	// Simulate payload construction logic
@@ -152,6 +152,9 @@ func TestPayloadStructure(t *testing.T) {
 	}
 
 	// Print JSON representation for manual inspection
-	jsonBytes, _ := json.MarshalIndent(payloadData, "", "  ")
+	jsonBytes, err := json.MarshalIndent(payloadData, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal payload: %v", err)
+	}
 	t.Logf("Payload structure:\n%s", string(jsonBytes))
 }
