@@ -26,10 +26,20 @@ type Investigation struct {
 
 // InvestigationPayload represents the payload sent to the AgentCore agent
 type InvestigationPayload struct {
-	InvestigationID      string `json:"investigation_id"`
-	InvestigationPayload string `json:"investigation_payload"` // TODO: Implement - should contain alert details/context
-	AlertName            string `json:"alert_name"`
-	ClusterID            string `json:"cluster_id"`
+	InvestigationID      string                 `json:"investigation_id"`
+	InvestigationPayload map[string]interface{} `json:"investigation_payload"` // Alert details and context
+	AlertName            string                 `json:"alert_name"`
+	ClusterID            string                 `json:"cluster_id"`
+}
+
+// AlertMetadata contains extracted metadata from PagerDuty alerts
+type AlertMetadata struct {
+	Summary       string                 `json:"summary,omitempty"`
+	Severity      string                 `json:"severity,omitempty"`
+	Source        string                 `json:"source,omitempty"`
+	Timestamp     string                 `json:"timestamp,omitempty"`
+	CustomDetails map[string]interface{} `json:"custom_details,omitempty"`
+	IncidentURL   string                 `json:"incident_url,omitempty"`
 }
 
 // generateSessionID generates a unique session ID for this investigation
@@ -41,6 +51,57 @@ func generateSessionID(incidentID string) string {
 	}
 	randomHex := hex.EncodeToString(randomBytes)
 	return fmt.Sprintf("cad-%s-%d-%s", incidentID, timestamp, randomHex)
+}
+
+// extractAlertMetadata retrieves comprehensive alert details from PagerDuty
+func extractAlertMetadata(pdClient *pagerduty.SdkClient) (*AlertMetadata, error) {
+	metadata := &AlertMetadata{
+		IncidentURL: pdClient.GetIncidentRef(),
+	}
+
+	// Get alerts for the incident
+	incidentID := pdClient.GetIncidentID()
+	alerts, err := pdClient.GetAlertsForIncident(incidentID)
+	if err != nil {
+		return metadata, fmt.Errorf("failed to get alerts for incident: %w", err)
+	}
+
+	if len(*alerts) == 0 {
+		return metadata, fmt.Errorf("no alerts found for incident %s", incidentID)
+	}
+
+	// Use the first alert (there should typically be only one)
+	alert := (*alerts)[0]
+
+	// Extract fields from alert body
+	if alert.Body != nil {
+		// Extract summary
+		if summary, ok := alert.Body["summary"].(string); ok {
+			metadata.Summary = summary
+		}
+
+		// Extract severity
+		if severity, ok := alert.Body["severity"].(string); ok {
+			metadata.Severity = severity
+		}
+
+		// Extract source
+		if source, ok := alert.Body["source"].(string); ok {
+			metadata.Source = source
+		}
+
+		// Extract timestamp
+		if timestamp, ok := alert.Body["timestamp"].(string); ok {
+			metadata.Timestamp = timestamp
+		}
+
+		// Extract custom_details (contains alertname, cluster_id, and other alert-specific fields)
+		if details, ok := alert.Body["details"].(map[string]interface{}); ok {
+			metadata.CustomDetails = details
+		}
+	}
+
+	return metadata, nil
 }
 
 func (c *Investigation) Run(rb investigation.ResourceBuilder) (investigation.InvestigationResult, error) {
@@ -112,10 +173,29 @@ func (c *Investigation) Run(rb investigation.ResourceBuilder) (investigation.Inv
 	incidentID := pdClient.GetIncidentID()
 	alertName := pdClient.GetTitle()
 
-	// Build investigation payload using typed structure
+	// Extract comprehensive alert metadata
+	alertMetadata, err := extractAlertMetadata(pdClient)
+	if err != nil {
+		logging.Warnf("Failed to extract full alert metadata: %v", err)
+		// Continue with basic payload if metadata extraction fails
+	}
+
+	// Build investigation payload with alert context
+	payloadData := make(map[string]interface{})
+	if alertMetadata != nil {
+		payloadData["summary"] = alertMetadata.Summary
+		payloadData["severity"] = alertMetadata.Severity
+		payloadData["source"] = alertMetadata.Source
+		payloadData["timestamp"] = alertMetadata.Timestamp
+		payloadData["custom_details"] = alertMetadata.CustomDetails
+		payloadData["incident_url"] = alertMetadata.IncidentURL
+	}
+	payloadData["alert_name"] = alertName
+	payloadData["cluster_id"] = clusterID
+
 	investigationData := &InvestigationPayload{
 		InvestigationID:      incidentID,
-		InvestigationPayload: "{}", // TODO: Populate with alert details when implemented
+		InvestigationPayload: payloadData,
 		AlertName:            alertName,
 		ClusterID:            clusterID,
 	}
