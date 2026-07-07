@@ -159,12 +159,12 @@ func buildInvestigationPayload(alertMetadata *AlertMetadata) map[string]interfac
 		// Only explicitly approved fields are included to prevent accidental data leakage
 		filteredDetails := make(map[string]interface{})
 		allowedFields := []string{
-			"link",        // Runbook URL
-			"num_firing",  // Number of firing alerts
+			"link",         // Runbook URL
+			"num_firing",   // Number of firing alerts
 			"num_resolved", // Number of resolved alerts
-			"ocm_link",    // OCM console link
-			"region",      // AWS region
-			"dashboard",   // Grafana dashboard link (for monitoring alerts)
+			"ocm_link",     // OCM console link
+			"region",       // AWS region
+			"dashboard",    // Grafana dashboard link (for monitoring alerts)
 		}
 		for _, field := range allowedFields {
 			if value, ok := alertMetadata.CustomDetails[field]; ok {
