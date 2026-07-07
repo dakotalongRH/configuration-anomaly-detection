@@ -53,6 +53,33 @@ func generateSessionID(incidentID string) string {
 	return fmt.Sprintf("cad-%s-%d-%s", incidentID, timestamp, randomHex)
 }
 
+// parsePrometheusLabels extracts structured labels from the Prometheus "firing" text blob
+// Example input: "Labels:\n - alertname = KubePersistentVolumeFillingUp\n - namespace = openshift-monitoring\n..."
+func parsePrometheusLabels(firing string) map[string]string {
+	labels := make(map[string]string)
+
+	// Split by newlines and look for label lines
+	lines := strings.Split(firing, "\n")
+	for _, line := range lines {
+		// Look for lines like " - namespace = openshift-monitoring"
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+
+		// Remove the "- " prefix and split on " = "
+		line = strings.TrimPrefix(line, "- ")
+		parts := strings.SplitN(line, " = ", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			labels[key] = value
+		}
+	}
+
+	return labels
+}
+
 // extractAlertMetadata retrieves comprehensive alert details from PagerDuty
 func extractAlertMetadata(pdClient *pagerduty.SdkClient) (*AlertMetadata, error) {
 	metadata := &AlertMetadata{
@@ -183,15 +210,43 @@ func (c *Investigation) Run(rb investigation.ResourceBuilder) (investigation.Inv
 	// Build investigation payload with alert context
 	payloadData := make(map[string]interface{})
 	if alertMetadata != nil {
-		payloadData["summary"] = alertMetadata.Summary
+		// Add basic alert metadata
 		payloadData["severity"] = alertMetadata.Severity
-		payloadData["source"] = alertMetadata.Source
 		payloadData["timestamp"] = alertMetadata.Timestamp
-		payloadData["custom_details"] = alertMetadata.CustomDetails
 		payloadData["incident_url"] = alertMetadata.IncidentURL
+
+		// Parse Prometheus labels from the "firing" field for structured resource identification
+		// This prevents Cora from having to scan all namespaces/resources
+		var prometheusLabels map[string]string
+		if alertMetadata.CustomDetails != nil {
+			if firing, ok := alertMetadata.CustomDetails["firing"].(string); ok && firing != "" {
+				prometheusLabels = parsePrometheusLabels(firing)
+				if len(prometheusLabels) > 0 {
+					payloadData["labels"] = prometheusLabels
+					logging.Infof("Extracted %d Prometheus labels for AI investigation", len(prometheusLabels))
+				}
+			}
+
+			// Add useful custom details, excluding redundant/verbose fields
+			filteredDetails := make(map[string]interface{})
+			for key, value := range alertMetadata.CustomDetails {
+				switch key {
+				case "alert_name", "cluster_id":
+					// Skip - already in top-level fields (AlertName, ClusterID)
+					continue
+				case "firing", "resolved":
+					// Skip - raw text blobs, labels extracted above
+					continue
+				default:
+					// Include: link, num_firing, num_resolved, ocm_link, region, etc.
+					filteredDetails[key] = value
+				}
+			}
+			if len(filteredDetails) > 0 {
+				payloadData["alert_details"] = filteredDetails
+			}
+		}
 	}
-	payloadData["alert_name"] = alertName
-	payloadData["cluster_id"] = clusterID
 
 	investigationData := &InvestigationPayload{
 		InvestigationID:      incidentID,
