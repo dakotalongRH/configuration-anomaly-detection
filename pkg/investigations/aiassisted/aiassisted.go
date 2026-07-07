@@ -82,19 +82,20 @@ func parsePrometheusLabels(firing string) map[string]string {
 
 // extractAlertMetadata retrieves comprehensive alert details from PagerDuty
 func extractAlertMetadata(pdClient *pagerduty.SdkClient) (*AlertMetadata, error) {
-	metadata := &AlertMetadata{
-		IncidentURL: pdClient.GetIncidentRef(),
-	}
-
 	// Get alerts for the incident
 	incidentID := pdClient.GetIncidentID()
 	alerts, err := pdClient.GetAlertsForIncident(incidentID)
 	if err != nil {
-		return metadata, fmt.Errorf("failed to get alerts for incident: %w", err)
+		return nil, fmt.Errorf("failed to get alerts for incident: %w", err)
 	}
 
 	if alerts == nil || len(*alerts) == 0 {
-		return metadata, fmt.Errorf("no alerts found for incident %s", incidentID)
+		return nil, fmt.Errorf("no alerts found for incident %s", incidentID)
+	}
+
+	// Initialize metadata after successful alert retrieval
+	metadata := &AlertMetadata{
+		IncidentURL: pdClient.GetIncidentRef(),
 	}
 
 	// Use the first alert (there should typically be only one)
@@ -154,19 +155,20 @@ func buildInvestigationPayload(alertMetadata *AlertMetadata) map[string]interfac
 			}
 		}
 
-		// Add useful custom details, excluding redundant/verbose fields
+		// Add approved custom details using allow-list for security
+		// Only explicitly approved fields are included to prevent accidental data leakage
 		filteredDetails := make(map[string]interface{})
-		for key, value := range alertMetadata.CustomDetails {
-			switch key {
-			case "alert_name", "cluster_id":
-				// Skip - already in top-level fields (AlertName, ClusterID)
-				continue
-			case "firing", "resolved":
-				// Skip - raw text blobs, labels extracted above
-				continue
-			default:
-				// Include: link, num_firing, num_resolved, ocm_link, region, etc.
-				filteredDetails[key] = value
+		allowedFields := []string{
+			"link",        // Runbook URL
+			"num_firing",  // Number of firing alerts
+			"num_resolved", // Number of resolved alerts
+			"ocm_link",    // OCM console link
+			"region",      // AWS region
+			"dashboard",   // Grafana dashboard link (for monitoring alerts)
+		}
+		for _, field := range allowedFields {
+			if value, ok := alertMetadata.CustomDetails[field]; ok {
+				filteredDetails[field] = value
 			}
 		}
 		if len(filteredDetails) > 0 {
