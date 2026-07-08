@@ -293,7 +293,8 @@ func TestRunHCPEtcdAnalysis_Success(t *testing.T) {
 	assert.True(t, result.EtcdDatabaseAnalysis.Performed)
 	assert.Contains(t, result.EtcdDatabaseAnalysis.Labels, "success")
 	assert.Contains(t, result.EtcdDatabaseAnalysis.Labels, "completed")
-	assert.Len(t, result.Actions, 3) // NoteAndReportFrom (2 actions) + Escalate (1 action)
+	assert.Len(t, result.Actions, 3) // NoteAndReportFrom (2 actions) + Silence (1 action)
+	assert.Equal(t, "silence_incident", result.Actions[2].Type())
 
 	// Verify Dynatrace URL appears in notes
 	notesContent := rb.Resources.Notes.String()

@@ -216,7 +216,7 @@ func (i *Investigation) Run(rb investigation.ResourceBuilder) (investigation.Inv
 	result.Actions = append(
 		executor.NoteAndReportFrom(r.Notes, r.Cluster.ID(), i.Name()),
 		backplaneReportAction, // write a second report here, as this contains the formatted results
-		executor.Escalate("etcd analysis complete - see report for details"),
+		executor.Silence("etcd analysis complete - compaction/defrag usually resolves this, silencing alert"),
 	)
 
 	return result, nil
@@ -352,7 +352,7 @@ func (i *Investigation) runHCPEtcdAnalysis(ctx context.Context, rb investigation
 
 	result.Actions = append(
 		executor.NoteAndReportFrom(r.Notes, r.Cluster.ID(), i.Name()),
-		executor.Escalate("HCP etcd analysis complete - see dynatrace logs for details"),
+		executor.Silence("HCP etcd analysis complete - compaction/defrag usually resolves this, silencing alert"),
 	)
 	return result, nil
 }
