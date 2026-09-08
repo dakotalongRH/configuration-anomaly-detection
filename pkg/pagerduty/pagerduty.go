@@ -411,6 +411,13 @@ type notesData struct {
 	ClusterID string `yaml:"cluster_id"`
 }
 
+// firingAlert is the subset of Alertmanager's template.Alert that CAD needs. Since the COO
+// cutover (app-interface !204683, 2026-09-02) the PagerDuty 'firing' custom detail carries a
+// JSON array of these instead of the plain-text 'pagerduty.default.instances' render.
+type firingAlert struct {
+	Labels map[string]string `json:"labels"`
+}
+
 // clusterIDFromFiringRe matches standalone "cluster_id = <value>" within a (potentially
 // multi-line) firing alert text. The named capture group "id" extracts the value.
 // (?:^|\s) requires either start-of-string or a whitespace character immediately before
@@ -430,7 +437,7 @@ func extractClusterIDFromAlertBody(data map[string]interface{}) (string, error) 
 	for _, extractor := range extractors {
 		id, err := extractor(details)
 		if err != nil {
-			logging.Info("failed to extract cluster id (continuing): %s", err)
+			logging.Infof("failed to extract cluster id (continuing): %v", err)
 			errs = append(errs, err)
 		}
 		if id != "" {
@@ -438,7 +445,7 @@ func extractClusterIDFromAlertBody(data map[string]interface{}) (string, error) 
 		}
 	}
 	mergedErr := errors.Join(errs...)
-	logging.Info("failed to extract cluster id ( terminally ): %s", mergedErr)
+	logging.Info("failed to extract cluster id ( terminally ): %v", mergedErr)
 	return "", mergedErr
 }
 
@@ -476,13 +483,26 @@ func parseClusterIdFromNotes(details map[string]interface{}) (string, error) {
 }
 
 // PARSE OPTION 3 (HCPNodepoolUpgradeDelay): these alerts have their own format and set neither
-// 'notes' nor 'cluster_id', so the ID must be extracted from the free-text 'firing' field.
+// 'notes' nor 'cluster_id', so the ID must be extracted from the 'firing' field (as a JSON
+// array of alerts post-COO-cutover, or as free-text on older incidents).
 func parseClusterIdFromFiring(details map[string]interface{}) (string, error) {
-	logging.Warn("Trying to parse 'cluster_id = <id>' free text from 'firing'")
+	logging.Warn("Trying to parse 'cluster_id' from JSON 'firing' field")
 	firing, found := details["firing"].(string)
 	if !found {
 		return "", errors.New("could not find firing field")
 	}
+
+	var alerts []firingAlert
+	if err := json.Unmarshal([]byte(firing), &alerts); err == nil {
+		for _, alert := range alerts {
+			if id := alert.Labels["cluster_id"]; id != "" {
+				return id, nil
+			}
+		}
+		return "", errors.New("no cluster_id label found in JSON firing field")
+	}
+
+	logging.Warn("Trying to parse 'cluster_id = <id>' free text from 'firing'")
 	match := clusterIDFromFiringRe.FindStringSubmatch(firing)
 	idIdx := clusterIDFromFiringRe.SubexpIndex("id")
 	if idIdx < 0 || idIdx >= len(match) {
