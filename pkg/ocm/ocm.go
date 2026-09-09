@@ -15,6 +15,7 @@ import (
 	servicelogsv1 "github.com/openshift-online/ocm-sdk-go/servicelogs/v1"
 	awsv1alpha1 "github.com/openshift/aws-account-operator/api/v1alpha1"
 	"github.com/openshift/configuration-anomaly-detection/pkg/logging"
+	"github.com/openshift/configuration-anomaly-detection/pkg/utils"
 	hivev1 "github.com/openshift/hive/apis/hive/v1"
 )
 
@@ -122,7 +123,13 @@ func (c *SdkClient) GetAWSAccountClaim(internalClusterID string) (*awsv1alpha1.A
 // GetClusterInfo returns cluster information from ocm by using either internal, external id or the cluster name
 // Returns a v1.Cluster object or an error
 func (c *SdkClient) GetClusterInfo(identifier string) (*cmv1.Cluster, error) {
-	q := fmt.Sprintf("(id like '%[1]s' or external_id like '%[1]s' or display_name like '%[1]s')", identifier)
+	// Validated before interpolation into the search expression below. This is the single choke
+	// point for every caller, including those passing identifiers extracted from alert payloads.
+	if !utils.IsValidClusterIdentifier(identifier) {
+		return nil, fmt.Errorf("invalid cluster identifier: %q", identifier)
+	}
+	// '=' rather than 'like': no wildcard matching is intended here.
+	q := fmt.Sprintf("(id = '%[1]s' or external_id = '%[1]s' or display_name = '%[1]s')", identifier)
 	resp, err := c.conn.ClustersMgmt().V1().Clusters().List().Search(q).Send()
 	if err != nil || resp.Error() != nil || resp.Status() != http.StatusOK {
 		return nil, fmt.Errorf("received error while fetch ClusterInfo from ocm: %w with resp %#v", err, resp)

@@ -22,7 +22,11 @@ declare -A alert_mapping=(
 
 # Function to print help message
 print_help() {
-    echo "Usage: $0 <alertname> <clusterid>"
+    echo "Usage: $0 <alertname> <clusterid> [cluster_id|firing]"
+    echo "The optional third argument selects how the cluster ID is carried in the payload:"
+    echo "  cluster_id (default) - as a dedicated 'cluster_id' custom detail"
+    echo "  firing               - only as a label inside the JSON 'firing' custom detail,"
+    echo "                         the format Alertmanager has produced since the COO cutover"
     echo -n "Available alert names (comma separated): "
     for alert_name in "${!alert_mapping[@]}"; do
         echo -n "$alert_name, "
@@ -30,13 +34,14 @@ print_help() {
     echo
 }
 # Check if the correct number of arguments is provided
-if [ "$#" -ne 2 ]; then
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
     print_help
     exit 1
 fi
 
 alert_name=$1
 cluster_id=$2
+id_format=${3:-cluster_id}
 time_current=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Check if the alert name is in the mapping
@@ -47,6 +52,30 @@ if [ -z "${alert_mapping[$alert_name]}" ]; then
 fi
 
 alert_title="${alert_mapping[$alert_name]}"
+
+# Build the custom details carrying the cluster ID in the requested format
+case "$id_format" in
+    cluster_id)
+        custom_details=$(jq -n --arg alertname "$alert_name" --arg cluster_id "$cluster_id" \
+            '{alertname: $alertname, cluster_id: $cluster_id}')
+        ;;
+    firing)
+        # Alertmanager renders 'firing' as a JSON array of alerts, so the cluster ID is only
+        # reachable as a label and no dedicated 'cluster_id' detail is sent.
+        firing=$(jq -n -c --arg alertname "$alert_name" --arg cluster_id "$cluster_id" --arg ts "$time_current" \
+            '[{status: "firing",
+               labels: {alertname: $alertname, cluster_id: $cluster_id, node_pool_id: "cad-integration-testing", service: "srep", severity: "critical"},
+               annotations: {message: ("HCP Cluster " + $cluster_id + " nodepool upgrade delay for nodepool id : cad-integration-testing")},
+               startsAt: $ts}]')
+        custom_details=$(jq -n --arg alertname "$alert_name" --arg firing "$firing" \
+            '{alertname: $alertname, firing: $firing, num_firing: "1", num_resolved: "0"}')
+        ;;
+    *)
+        echo "Error: Unknown cluster ID format '$id_format'"
+        print_help
+        exit 1
+        ;;
+esac
 
 # Load testing routing key and test service url from vault
 export VAULT_ADDR="https://vault.devshift.net"
@@ -68,10 +97,7 @@ response=$(curl --silent --request POST \
       "timestamp": "'"${time_current}"'",
       "severity": "critical",
       "source": "cad-integration-testing",
-      "custom_details": {
-        "alertname": "'"${alert_name}"'",
-        "cluster_id": "'"${cluster_id}"'"
-      }
+      "custom_details": '"${custom_details}"'
     },
     "routing_key": "'"${pd_test_routing_key}"'",
     "event_action": "trigger",

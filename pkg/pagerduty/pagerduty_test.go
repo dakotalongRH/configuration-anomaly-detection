@@ -369,6 +369,20 @@ var _ = Describe("Pagerduty", func() {
 					Expect(res).Should(Equal("654321"))
 				})
 			})
+			When("[HCPNodepoolUpgradeDelay] the payload contains the cluster_id in the firing field (COO JSON)", func() {
+				It("should succeed and pull the clusterID from a JSON firing payload", func() {
+					// Arrange: since the COO cutover the firing field carries a JSON array of
+					// Alertmanager alerts, so cluster_id is a label rather than free text.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"firing":"[{\"labels\":{\"alertname\":\"HCPNodepoolUpgradeDelay\",\"cluster_id\":\"654321\"}}]"}}}]}`)
+					})
+					// Act
+					res, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).ShouldNot(HaveOccurred())
+					Expect(res).Should(Equal("654321"))
+				})
+			})
 			When("[HCPNodepoolUpgradeDelay] the firing field only contains hosted_cluster_id (no standalone cluster_id)", func() {
 				It("should not match hosted_cluster_id and should raise an error", func() {
 					// Arrange: hosted_cluster_id must not be mistaken for cluster_id
@@ -379,6 +393,72 @@ var _ = Describe("Pagerduty", func() {
 					_, err := p.RetrieveClusterID()
 					// Assert
 					Expect(err).Should(HaveOccurred())
+				})
+			})
+			When("[HCPNodepoolUpgradeDelay] the JSON firing field has no cluster_id label", func() {
+				It("should not match hosted_cluster_id and should raise an error", func() {
+					// Arrange: hosted_cluster_id must not be mistaken for cluster_id
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"firing":"[{\"labels\":{\"hosted_cluster_id\":\"abc123\"}}]"}}}]}`)
+					})
+					// Act
+					_, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).Should(HaveOccurred())
+				})
+			})
+			When("[HCPNodepoolUpgradeDelay] the JSON firing field groups several alerts", func() {
+				It("should pull the clusterID from whichever alert carries it", func() {
+					// Arrange: Alertmanager groups on ['job', 'cluster', 'service'], so one
+					// incident can carry several alerts differing only by node_pool_id.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"firing":"[{\"labels\":{\"alertname\":\"HCPNodepoolUpgradeDelay\"}},{\"labels\":{\"alertname\":\"HCPNodepoolUpgradeDelay\",\"cluster_id\":\"654321\",\"node_pool_id\":\"r5-2xlarge-1b\"}}]"}}}]}`)
+					})
+					// Act
+					res, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).ShouldNot(HaveOccurred())
+					Expect(res).Should(Equal("654321"))
+				})
+			})
+			When("the JSON firing field carries a cluster_id label outside the accepted character class", func() {
+				It("should reject the label and raise an error", func() {
+					// Arrange: labels are untrusted input, so a value that is not a valid cluster
+					// identifier must not be passed through to the OCM lookup.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"firing":"[{\"labels\":{\"cluster_id\":\"x' or external_id like '654321\"}}]"}}}]}`)
+					})
+					// Act
+					_, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).Should(HaveOccurred())
+				})
+			})
+			When("the cluster_id field contains characters outside the accepted character class", func() {
+				It("should reject the value and raise an error", func() {
+					// Arrange: a value that is not a valid cluster identifier must be rejected
+					// rather than looked up.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"cluster_id":"6543%"}}}]}`)
+					})
+					// Act
+					_, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).Should(HaveOccurred())
+				})
+			})
+			When("an earlier extractor yields an invalid value but a later one yields a valid id", func() {
+				It("should discard the invalid value and fall through", func() {
+					// Arrange: 'cluster_id' is a free-text placeholder, so extraction must continue
+					// to the notes field rather than committing to the first non-empty value.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"cluster_id":"<no value>","notes":"cluster_id: 654321"}}}]}`)
+					})
+					// Act
+					res, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).ShouldNot(HaveOccurred())
+					Expect(res).Should(Equal("654321"))
 				})
 			})
 			When("the alert body does not have a 'details' nor 'firing' field", func() {
