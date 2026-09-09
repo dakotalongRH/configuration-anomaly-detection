@@ -421,6 +421,46 @@ var _ = Describe("Pagerduty", func() {
 					Expect(res).Should(Equal("654321"))
 				})
 			})
+			When("the JSON firing field carries a cluster_id label outside the accepted character class", func() {
+				It("should reject the label and raise an error", func() {
+					// Arrange: labels are untrusted input, so a value that is not a valid cluster
+					// identifier must not be passed through to the OCM lookup.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"firing":"[{\"labels\":{\"cluster_id\":\"x' or external_id like '654321\"}}]"}}}]}`)
+					})
+					// Act
+					_, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).Should(HaveOccurred())
+				})
+			})
+			When("the cluster_id field contains characters outside the accepted character class", func() {
+				It("should reject the value and raise an error", func() {
+					// Arrange: a value that is not a valid cluster identifier must be rejected
+					// rather than looked up.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"cluster_id":"6543%"}}}]}`)
+					})
+					// Act
+					_, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).Should(HaveOccurred())
+				})
+			})
+			When("an earlier extractor yields an invalid value but a later one yields a valid id", func() {
+				It("should discard the invalid value and fall through", func() {
+					// Arrange: 'cluster_id' is a free-text placeholder, so extraction must continue
+					// to the notes field rather than committing to the first non-empty value.
+					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {
+						_, _ = fmt.Fprint(w, `{"alerts":[{"id":"1234","body":{"details":{"cluster_id":"<no value>","notes":"cluster_id: 654321"}}}]}`)
+					})
+					// Act
+					res, err := p.RetrieveClusterID()
+					// Assert
+					Expect(err).ShouldNot(HaveOccurred())
+					Expect(res).Should(Equal("654321"))
+				})
+			})
 			When("the alert body does not have a 'details' nor 'firing' field", func() {
 				It("should raise an error", func() {
 					mux.HandleFunc(fmt.Sprintf("/incidents/%s/alerts", incidentID), func(w http.ResponseWriter, r *http.Request) {

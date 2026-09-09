@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openshift/configuration-anomaly-detection/pkg/logging"
+	"github.com/openshift/configuration-anomaly-detection/pkg/utils"
 	"gopkg.in/yaml.v3"
 
 	sdk "github.com/PagerDuty/go-pagerduty"
@@ -440,12 +441,21 @@ func extractClusterIDFromAlertBody(data map[string]interface{}) (string, error) 
 			logging.Infof("failed to extract cluster id (continuing): %v", err)
 			errs = append(errs, err)
 		}
+		// An extractor can pick up a value that is not an identifier at all (a free-text
+		// placeholder, a stray token). Discarding it here lets the remaining extractors run
+		// instead of committing to a value the OCM lookup will reject.
+		if id != "" && !utils.IsValidClusterIdentifier(id) {
+			err := fmt.Errorf("extracted cluster id %q is not a valid cluster identifier", id)
+			logging.Infof("%v (continuing)", err)
+			errs = append(errs, err)
+			continue
+		}
 		if id != "" {
 			return id, nil
 		}
 	}
 	mergedErr := errors.Join(errs...)
-	logging.Info("failed to extract cluster id ( terminally ): %v", mergedErr)
+	logging.Infof("failed to extract cluster id ( terminally ): %v", mergedErr)
 	return "", mergedErr
 }
 
