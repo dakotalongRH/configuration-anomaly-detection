@@ -195,10 +195,10 @@ objects:
         - computeResources:
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 1Gi
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi
           pipelineTaskName: perform-cad-checks
         timeout: 30m
 - apiVersion: triggers.tekton.dev/v1beta1
@@ -437,10 +437,10 @@ objects:
       resources:
         limits:
           cpu: 100m
-          memory: 512Mi
+          memory: 1Gi
         requests:
           cpu: 20m
-          memory: 256Mi
+          memory: 512Mi
       volumeMounts:
       - name: cad-config
         mountPath: /config
@@ -508,10 +508,10 @@ objects:
       resources:
         limits:
           cpu: 100m
-          memory: 512Mi
+          memory: 1Gi
         requests:
           cpu: 20m
-          memory: 256Mi
+          memory: 512Mi
       volumeMounts:
       - name: cad-config
         mountPath: /config
@@ -535,7 +535,7 @@ objects:
         memory: 128Mi
       max:  # The maximum limits
         cpu: 1
-        memory: 1Gi
+        memory: 2Gi
       min:  # The minimum requests
         cpu: 1m
         memory: 32Mi
